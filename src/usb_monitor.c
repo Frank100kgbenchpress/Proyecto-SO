@@ -83,25 +83,18 @@ void compare_usb_snapshot(const char *path, const char *snapshot_file) {
 
     save_usb_snapshot(path, snapshot_file);
 }
-void save_usb_snapshot(const char *path, const char *output_file) {
-    FILE *out = fopen(output_file, "w");
-    if (!out) {
-        perror("No se pudo abrir el archivo de snapshot");
-        return;
-    }
-
+// Función interna que escribe todos los archivos en 'out'
+static void write_snapshot(const char *path, FILE *out) {
     DIR *dir = opendir(path);
     struct dirent *entry;
-
     if (!dir) {
-        perror("No se puede abrir el directorio del dispositivo");
-        fclose(out);
+        perror("No se puede abrir el directorio para snapshot");
         return;
     }
 
     while ((entry = readdir(dir)) != NULL) {
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
-            continue;
+        if (strcmp(entry->d_name, ".") == 0 ||
+            strcmp(entry->d_name, "..") == 0) continue;
 
         char full_path[1024];
         snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
@@ -109,16 +102,30 @@ void save_usb_snapshot(const char *path, const char *output_file) {
         struct stat st;
         if (stat(full_path, &st) == 0) {
             if (S_ISDIR(st.st_mode)) {
-                save_usb_snapshot(full_path, output_file); // Recursivo
+                // Recurse into subdirectorios usando el mismo FILE*
+                write_snapshot(full_path, out);
             } else {
                 fprintf(out, "%s|%ld\n", full_path, st.st_mtime);
             }
         }
     }
-
     closedir(dir);
-    fclose(out);
 }
+
+// Wrapper que abre el fichero una sola vez
+void save_usb_snapshot(const char *path, const char *output_file) {
+    FILE *out = fopen(output_file, "w");
+    if (!out) {
+        perror("No se pudo abrir el archivo de snapshot");
+        return;
+    }
+
+    write_snapshot(path, out);
+    fclose(out);
+
+    printf("📁 Snapshot guardado en %s\n", output_file);
+}
+
 
 void list_usb_devices(const char *mount_point) {
     DIR *dir = opendir(mount_point);
