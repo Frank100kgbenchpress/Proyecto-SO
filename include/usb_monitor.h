@@ -2,7 +2,11 @@
 #define USB_MONITOR_H
 
 void list_usb_devices(const char *mount_point);
-void save_usb_snapshot(const char *path, const char *output_file);
-void compare_usb_snapshot(const char *path, const char *snapshot_file);
+
+void compute_sha256(const char *filepath, char *output, size_t maxlen);
+
+void save_usb_security_baseline(const char *usb_path, const char *baseline_file);
+
+void compare_usb_security_baseline(const char *usb_path, const char *baseline_file, double alert_threshold_percent);
 
 #endif

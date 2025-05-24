@@ -1,150 +1,213 @@
 #include <stdio.h>
-#include <dirent.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <pwd.h>
+#include <grp.h>
+#include <dirent.h>
 #include <sys/stat.h>
-#include "usb_monitor.h"
-#include <time.h>
-struct stat_snapshot {
+
+#define MAX_FILES 2000
+
+struct baseline_entry {
     char path[1024];
+    long size;
+    char perms[10];
     long mtime;
+    char owner[64];
+    char hash[256];
 };
-void recursive_compare(const char *cur_path,
-                       const char *snapshot_file,
-                       struct stat_snapshot *old_files,
-                       int old_count,
-                       int *found) {
-    DIR *d = opendir(cur_path);
-    struct dirent *entry;
 
-    if (!d) return;
-
-    while ((entry = readdir(d)) != NULL) {
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
-            continue;
-
-        char full_path[1024];
-        snprintf(full_path, sizeof(full_path), "%s/%s", cur_path, entry->d_name);
-
-        struct stat st;
-        if (stat(full_path, &st) == 0) {
-            if (S_ISDIR(st.st_mode)) {
-                recursive_compare(full_path, snapshot_file, old_files, old_count, found);
-            } else {
-                int match = 0;
-                for (int i = 0; i < old_count; i++) {
-                    if (strcmp(full_path, old_files[i].path) == 0) {
-                        match = 1;
-                        found[i] = 1;
-                        if (st.st_mtime != old_files[i].mtime) {
-                            printf("📝 Modificado: %s\n", full_path);
-                        }
-                        break;
-                    }
-                }
-                if (!match) {
-                    printf("➕ Nuevo: %s\n", full_path);
-                }
-            }
-        }
+void compute_sha256(const char *filepath, char *output, size_t maxlen) {
+    char cmd[1024];
+    snprintf(cmd, sizeof(cmd), "sha256sum \"%s\" 2>/dev/null", filepath);
+    FILE *fp = popen(cmd, "r");
+    if (fp) {
+        fgets(output, maxlen, fp);
+        strtok(output, " ");
+        pclose(fp);
+    } else {
+        strcpy(output, "error");
     }
-
-    closedir(d);
 }
-void compare_usb_snapshot(const char *path, const char *snapshot_file) {
-    FILE *in = fopen(snapshot_file, "r");
-    if (!in) {
-        printf("⚠️ No se encontró snapshot anterior. Generando uno nuevo...\n");
-        save_usb_snapshot(path, snapshot_file);
-        return;
-    }
 
-    struct stat_snapshot old_files[1000];
-    int found[1000] = {0};
-    int old_count = 0;
-    char line[1024];
-
-    while (fgets(line, sizeof(line), in)) {
-        if (sscanf(line, "%[^|]|%ld", old_files[old_count].path, &old_files[old_count].mtime) == 2) {
-            old_count++;
-        }
-    }
-
-    fclose(in);
-
-    printf("📦 Cambios detectados desde el último escaneo:\n");
-
-    recursive_compare(path, snapshot_file, old_files, old_count, found);
-
-    for (int i = 0; i < old_count; i++) {
-        if (!found[i]) {
-            printf("❌ Eliminado: %s\n", old_files[i].path);
-        }
-    }
-
-    save_usb_snapshot(path, snapshot_file);
-}
-// Función interna que escribe todos los archivos en 'out'
-static void write_snapshot(const char *path, FILE *out) {
+void save_baseline_recursive(const char *path, FILE *out) {
     DIR *dir = opendir(path);
-    struct dirent *entry;
-    if (!dir) {
-        perror("No se puede abrir el directorio para snapshot");
-        return;
-    }
+    if (!dir) return;
 
-    while ((entry = readdir(dir)) != NULL) {
-        if (strcmp(entry->d_name, ".") == 0 ||
-            strcmp(entry->d_name, "..") == 0) continue;
+    struct dirent *entry;
+    while ((entry = readdir(dir))) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
 
         char full_path[1024];
         snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
 
         struct stat st;
-        if (stat(full_path, &st) == 0) {
-            if (S_ISDIR(st.st_mode)) {
-                // Recurse into subdirectorios usando el mismo FILE*
-                write_snapshot(full_path, out);
+        if (stat(full_path, &st) != 0) continue;
+
+        if (S_ISDIR(st.st_mode)) {
+            save_baseline_recursive(full_path, out);
+        } else {
+            char perm[10];
+            snprintf(perm, sizeof(perm), "%o", st.st_mode & 0777);
+
+            struct passwd *pw = getpwuid(st.st_uid);
+            struct group  *gr = getgrgid(st.st_gid);
+            const char *owner = pw ? pw->pw_name : "unknown";
+            const char *group = gr ? gr->gr_name : "unknown";
+
+            char hash[256];
+            compute_sha256(full_path, hash, sizeof(hash));
+
+            fprintf(out, "%s|%ld|%s|%ld|%s:%s|%s\n",
+                    full_path,
+                    (long)st.st_size,
+                    perm,
+                    (long)st.st_mtime,
+                    owner,
+                    group,
+                    hash);
+        }
+    }
+    closedir(dir);
+}
+
+void save_usb_security_baseline(const char *usb_path, const char *baseline_file) {
+    FILE *out = fopen(baseline_file, "w");
+    if (!out) {
+        perror("No se pudo guardar el baseline");
+        return;
+    }
+    save_baseline_recursive(usb_path, out);
+    fclose(out);
+    printf("\U0001F6E1 Baseline de seguridad guardado en %s\n", baseline_file);
+}
+
+int load_baseline(const char *file, struct baseline_entry *entries) {
+    FILE *f = fopen(file, "r");
+    if (!f) return -1;
+
+    int count = 0;
+    while (fscanf(f, "%[^|]|%ld|%[^|]|%ld|%[^|]|%s\n",
+                  entries[count].path,
+                  &entries[count].size,
+                  entries[count].perms,
+                  &entries[count].mtime,
+                  entries[count].owner,
+                  entries[count].hash) == 6) {
+        count++;
+    }
+    fclose(f);
+    return count;
+}
+
+int find_in_baseline(struct baseline_entry *baseline, int count, const char *path) {
+    for (int i = 0; i < count; i++) {
+        if (strcmp(baseline[i].path, path) == 0) return i;
+    }
+    return -1;
+}
+
+void check_recursive(const char *path,
+                     struct baseline_entry *baseline,
+                     int baseline_count,
+                     int *total_checked,
+                     int *suspicious_count) {
+    DIR *d = opendir(path);
+    if (!d) return;
+
+    struct dirent *entry;
+    while ((entry = readdir(d)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+
+        char full_path[1024];
+        snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
+
+        struct stat st;
+        if (stat(full_path, &st) != 0) continue;
+
+        if (S_ISDIR(st.st_mode)) {
+            check_recursive(full_path, baseline, baseline_count, total_checked, suspicious_count);
+        } else {
+            (*total_checked)++;
+
+            char current_perm[10];
+            snprintf(current_perm, sizeof(current_perm), "%o", st.st_mode & 0777);
+
+            struct passwd *pw = getpwuid(st.st_uid);
+            struct group  *gr = getgrgid(st.st_gid);
+            const char *owner = pw ? pw->pw_name : "unknown";
+            const char *group = gr ? gr->gr_name : "unknown";
+
+            char owner_str[64];
+            snprintf(owner_str, sizeof(owner_str), "%s:%s", owner, group);
+
+            char hash[256];
+            compute_sha256(full_path, hash, sizeof(hash));
+
+            int index = find_in_baseline(baseline, baseline_count, full_path);
+            if (index == -1) {
+                printf("❗ Archivo nuevo sospechoso: %s\n", full_path);
+                (*suspicious_count)++;
             } else {
-                fprintf(out, "%s|%ld\n", full_path, st.st_mtime);
+                struct baseline_entry *b = &baseline[index];
+
+                if (strcmp(b->hash, hash) != 0) {
+                    printf("📝 Contenido modificado: %s\n", full_path);
+                    (*suspicious_count)++;
+                }
+
+                if (b->size != st.st_size && labs(b->size - st.st_size) > b->size * 0.5) {
+                    printf("⚠️ Cambio de tamaño inusual: %s (%ld → %ld)\n", full_path, b->size, st.st_size);
+                    (*suspicious_count)++;
+                }
+
+                if (strcmp(b->perms, current_perm) != 0) {
+                    if (strcmp(current_perm, "777") == 0)
+                        printf("⚠️ Permiso 777 sospechoso: %s\n", full_path);
+                    else
+                        printf("⚠️ Permisos modificados: %s (%s → %s)\n", full_path, b->perms, current_perm);
+                    (*suspicious_count)++;
+                }
+
+                if (strcmp(b->owner, owner_str) != 0) {
+                    printf("⚠️ Propietario cambiado: %s (%s → %s)\n", full_path, b->owner, owner_str);
+                    (*suspicious_count)++;
+                }
+
+                if (b->mtime != st.st_mtime) {
+                    printf("⌛ Timestamp modificado: %s\n", full_path);
+                    (*suspicious_count)++;
+                }
             }
         }
     }
-    closedir(dir);
+    closedir(d);
 }
 
-// Wrapper que abre el fichero una sola vez
-void save_usb_snapshot(const char *path, const char *output_file) {
-    FILE *out = fopen(output_file, "w");
-    if (!out) {
-        perror("No se pudo abrir el archivo de snapshot");
+void compare_usb_security_baseline(const char *usb_path, const char *baseline_file, double alert_threshold_percent) {
+    struct baseline_entry baseline[MAX_FILES];
+    int baseline_count = load_baseline(baseline_file, baseline);
+    if (baseline_count < 0) {
+        printf("⚠️ No se pudo leer el baseline. Crea uno primero.\n");
         return;
     }
 
-    write_snapshot(path, out);
-    fclose(out);
+    int total_checked = 0, suspicious_count = 0;
+    check_recursive(usb_path, baseline, baseline_count, &total_checked, &suspicious_count);
 
-    printf("📁 Snapshot guardado en %s\n", output_file);
+    double percent = (total_checked == 0) ? 0.0 : ((double)suspicious_count / total_checked) * 100;
+    if (percent >= alert_threshold_percent) {
+        printf("🚨 ALERTA: Cambios sospechosos en %.1f%% de los archivos.\n", percent);
+    } else {
+        printf("✅ Análisis completo. Cambios sospechosos: %.1f%%\n", percent);
+    }
 }
 
 
-void list_usb_devices(const char *mount_point) {
-    DIR *dir = opendir(mount_point);
-    struct dirent *entry;
 
-    if (!dir) {
-        perror("No se puede abrir el punto de montaje");
-        return;
-    }
 
-    printf("📦 Dispositivos montados en %s:\n", mount_point);
 
-    while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_type == DT_DIR &&
-            strcmp(entry->d_name, ".") != 0 &&
-            strcmp(entry->d_name, "..") != 0) {
-            printf(" - %s\n", entry->d_name);
-        }
-    }
 
-    closedir(dir);
-}
+
+
