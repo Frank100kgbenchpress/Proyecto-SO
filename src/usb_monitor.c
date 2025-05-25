@@ -112,7 +112,9 @@ void check_recursive(const char *path,
                      struct baseline_entry *baseline,
                      int baseline_count,
                      int *total_checked,
-                     int *suspicious_count) {
+                     int *suspicious_count,
+                    int *found) {
+    
     DIR *d = opendir(path);
     if (!d) return;
 
@@ -127,7 +129,7 @@ void check_recursive(const char *path,
         if (stat(full_path, &st) != 0) continue;
 
         if (S_ISDIR(st.st_mode)) {
-            check_recursive(full_path, baseline, baseline_count, total_checked, suspicious_count);
+            check_recursive(full_path, baseline, baseline_count, total_checked, suspicious_count,found);
         } else {
             (*total_checked)++;
 
@@ -146,6 +148,10 @@ void check_recursive(const char *path,
             compute_sha256(full_path, hash, sizeof(hash));
 
             int index = find_in_baseline(baseline, baseline_count, full_path);
+            if (index >=0)
+            {
+                found[index] = 1;
+            }
             if (index == -1) {
                 printf("❗ Archivo nuevo sospechoso: %s\n", full_path);
                 (*suspicious_count)++;
@@ -194,14 +200,22 @@ void compare_usb_security_baseline(const char *usb_path, const char *baseline_fi
     }
 
     int total_checked = 0, suspicious_count = 0;
-    check_recursive(usb_path, baseline, baseline_count, &total_checked, &suspicious_count);
-
+    int found[MAX_FILES] = {0};         // Array para marcar los que seguimos teniendo
+    check_recursive(usb_path, baseline, baseline_count, &total_checked, &suspicious_count,found);
+    for (int i = 0; i < baseline_count; ++i)
+    {
+        if (!found[i])
+        {
+            printf("❌ Eliminado: %s\n", baseline[i].path);
+        }
+    }
     double percent = (total_checked == 0) ? 0.0 : ((double)suspicious_count / total_checked) * 100;
     if (percent >= alert_threshold_percent) {
         printf("🚨 ALERTA: Cambios sospechosos en %.1f%% de los archivos.\n", percent);
     } else {
         printf("✅ Análisis completo. Cambios sospechosos: %.1f%%\n", percent);
     }
+    save_usb_security_baseline(usb_path, baseline_file);
 }
 
 

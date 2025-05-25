@@ -49,7 +49,10 @@ int main(int argc, char *argv[]) {
         printf("🛡 No existe baseline. Creándolo por primera vez...\n");
         save_usb_security_baseline(full_path, baseline_file);
     }
-
+    else
+    {
+        printf("Usando baseline existente en %s\n",baseline_file);
+    }
     printf("\n🕵️ Comparando estado actual contra baseline...\n");
     compare_usb_security_baseline(full_path, baseline_file, 10.0);
 
