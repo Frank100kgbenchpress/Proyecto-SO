@@ -1,3 +1,4 @@
+#include <stddef.h>
 #ifndef USB_MONITOR_H
 #define USB_MONITOR_H
 
