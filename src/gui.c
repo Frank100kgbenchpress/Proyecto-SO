@@ -3,10 +3,64 @@
 #include <string.h>
 #include <dirent.h>
 #include <unistd.h>
+#include <stdio.h>
+
+#define CONFIG_PATH_FORMAT "/home/%s/.matcomguard.conf"
 
 static GtkWidget *combo_usb;
+static GtkTextBuffer *output_buffer;
+double alert_threshold = 10.0;  // Umbral configurable de alerta
+
+void save_alert_threshold(double threshold) {
+    char path[256];
+    snprintf(path, sizeof(path), CONFIG_PATH_FORMAT, getenv("USER"));
+    FILE *f = fopen(path, "w");
+    if (f) {
+        fprintf(f, "%.1f\n", threshold);
+        fclose(f);
+    }
+}
+
+void load_alert_threshold() {
+    char path[256];
+    snprintf(path, sizeof(path), CONFIG_PATH_FORMAT, getenv("USER"));
+    FILE *f = fopen(path, "r");
+    if (f) {
+        fscanf(f, "%lf", &alert_threshold);
+        fclose(f);
+    }
+}
+
+static void open_settings_dialog(GtkWidget *widget, gpointer data) {
+    GtkWidget *dialog = gtk_dialog_new_with_buttons("Configuración de Umbral",
+                                                   NULL,
+                                                   GTK_DIALOG_MODAL,
+                                                   ("Aceptar"), GTK_RESPONSE_OK,
+                                                   ("Cancelar"), GTK_RESPONSE_CANCEL,
+                                                   NULL);
+
+    GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
+    GtkWidget *spin = gtk_spin_button_new_with_range(1.0, 100.0, 1.0);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(spin), alert_threshold);
+
+    GtkWidget *label = gtk_label_new("Umbral de alerta (%):");
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+    gtk_box_pack_start(GTK_BOX(box), label, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(box), spin, FALSE, FALSE, 0);
+
+    gtk_container_add(GTK_CONTAINER(content_area), box);
+    gtk_widget_show_all(dialog);
+
+    if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK) {
+        alert_threshold = gtk_spin_button_get_value(GTK_SPIN_BUTTON(spin));
+        save_alert_threshold(alert_threshold);
+    }
+
+    gtk_widget_destroy(dialog);
+}
 
 static void scan_usb(GtkWidget *widget, gpointer data) {
+    GtkTextBuffer *buffer = GTK_TEXT_BUFFER(data);
     const gchar *selected_usb = gtk_combo_box_text_get_active_text(GTK_COMBO_BOX_TEXT(combo_usb));
 
     if (!selected_usb || strlen(selected_usb) == 0) {
@@ -18,18 +72,30 @@ static void scan_usb(GtkWidget *widget, gpointer data) {
     }
 
     char cmd[512];
-    snprintf(cmd, sizeof(cmd), "./build/matcom_guard \"%s\"", selected_usb);
+    snprintf(cmd, sizeof(cmd), "./build/matcom_guard \"%s\" %.1f", selected_usb, alert_threshold);
 
-    printf("DEBUG: Ejecutando → %s\n", cmd);
-    system(cmd);
+    FILE *fp = popen(cmd, "r");
+    if (!fp) return;
+
+    char line[1024];
+    GtkTextIter iter;
+    gtk_text_buffer_set_text(buffer, "", -1);  // Limpiar el buffer
+    gtk_text_buffer_get_iter_at_offset(buffer, &iter, 0);
+
+    while (fgets(line, sizeof(line), fp)) {
+        gtk_text_buffer_insert(buffer, &iter, line, -1);
+    }
+
+    pclose(fp);
 }
 
 int main(int argc, char *argv[]) {
     gtk_init(&argc, &argv);
+    load_alert_threshold();
 
     GtkWidget *window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(window), "MatCom Guard - El Gran Salón del Trono");
-    gtk_window_set_default_size(GTK_WINDOW(window), 400, 300);
+    gtk_window_set_default_size(GTK_WINDOW(window), 600, 400);
     gtk_container_set_border_width(GTK_CONTAINER(window), 20);
 
     GtkWidget *grid = gtk_grid_new();
@@ -60,12 +126,27 @@ int main(int argc, char *argv[]) {
         }
         closedir(dir);
     }
+    // Área de texto para resultados
+    GtkWidget *text_view = gtk_text_view_new();
+    gtk_text_view_set_editable(GTK_TEXT_VIEW(text_view), FALSE);
+    gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(text_view), GTK_WRAP_WORD);
+    output_buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
+    GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
+    gtk_container_add(GTK_CONTAINER(scroll), text_view);
+    gtk_widget_set_vexpand(scroll, TRUE);
+    gtk_grid_attach(GTK_GRID(grid), scroll, 0, 4, 2, 1);
     gtk_combo_box_set_active(GTK_COMBO_BOX(combo_usb), 0);
     gtk_grid_attach(GTK_GRID(grid), combo_usb, 1, 1, 1, 1);
 
     GtkWidget *btn_usb = gtk_button_new_with_label("2. Escanear memoria USB");
-    g_signal_connect(btn_usb, "clicked", G_CALLBACK(scan_usb), NULL);
+    g_signal_connect(btn_usb, "clicked", G_CALLBACK(scan_usb), output_buffer);
     gtk_grid_attach(GTK_GRID(grid), btn_usb, 0, 2, 2, 1);
+
+    GtkWidget *btn_config = gtk_button_new_with_label("⚙ Ajustes de Umbral");
+    g_signal_connect(btn_config, "clicked", G_CALLBACK(open_settings_dialog), NULL);
+    gtk_grid_attach(GTK_GRID(grid), btn_config, 0, 3, 2, 1);
+
+    
 
     g_signal_connect(window, "destroy", G_CALLBACK(gtk_main_quit), NULL);
 
