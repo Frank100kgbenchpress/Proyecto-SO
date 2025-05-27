@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include "usb_monitor.h"
 #include <dirent.h>
+#include <unistd.h>     //para gueteuid
 
 void list_usb_devices(const char *mount_point) {
     DIR *dir = opendir(mount_point);
@@ -24,6 +25,24 @@ void list_usb_devices(const char *mount_point) {
 }
 
 int main(int argc, char *argv[]) {
+    // Chequeo de permiso CAP_AUDIT_READ
+    if (geteuid() != 0) {
+        // Intentar invocar ausearch para validar acceso
+        if (system("/usr/sbin/ausearch --help > /dev/null 2>&1") != 0) {
+            fprintf(stderr, "⚠️ Este binario necesita CAP_AUDIT_READ para identificar procesos.\n");
+            fprintf(stderr, "   ¿Conceder permiso ahora? (y/N): ");
+            int c = getchar();
+            if (c == 'y' || c == 'Y') {
+                char cmd[512];
+                snprintf(cmd, sizeof(cmd), "sudo setcap cap_audit_read+ep %s", argv[0]);
+                system(cmd);
+                fprintf(stderr, "   ✔️ Permiso aplicado. Por favor, vuelve a ejecutar el programa.\n");
+                return 0;  // Salir para que el usuario vuelva a lanzar
+            } else {
+                fprintf(stderr, "   ❌ No se concedió el permiso. La auditoría quedará deshabilitada.\n");
+            }
+        }
+    }
     if (argc < 2) {
         fprintf(stderr, "Uso: %s <nombre_memoria_usb>\n", argv[0]);
         return 1;
