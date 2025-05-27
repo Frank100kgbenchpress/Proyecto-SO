@@ -43,6 +43,77 @@ int find_in_baseline(struct baseline_entry *baseline, int count, const char *pat
     return -1;
 }
 
+void mostrar_proceso_modificador(const char *archivo) {
+    char cmd[512];
+    // Llamamos solo a ausearch y capturamos TODO el bloque SYSCALL+PATH
+    snprintf(cmd, sizeof(cmd),
+             "/usr/sbin/ausearch -f \"%s\" -ts recent 2>/dev/null",
+             archivo);
+
+    FILE *fp = popen(cmd, "r");
+    if (!fp) {
+        fprintf(stderr, "[DEBUG] popen falló al ejecutar: %s\n", cmd);
+        return;
+    }
+
+    char line[1024];
+    char comm[128] = "(no registrado)",
+         exe[256]  = "(no registrado)",
+         tty[64]   = "(no registrado)",
+         uid[32]   = "(no registrado)";
+    int in_syscall = 0, encontrado = 0;
+
+    while (fgets(line, sizeof(line), fp)) {
+        // Detectamos el inicio del bloque SYSCALL
+        if (strstr(line, "type=SYSCALL")) {
+            in_syscall = 1;
+            encontrado = 0;  // reiniciamos por si hay varios bloques
+        }
+        if (!in_syscall) continue;
+
+        // Si es PATH, salimos del bloque tras registrarlo
+        if (strstr(line, "type=PATH")) {
+            break;
+        }
+
+        // Extraemos campos
+        char *p;
+        if ((p = strstr(line, "comm=\"")) && sscanf(p + 6, "%127[^\"]", comm) == 1) {
+            encontrado = 1;
+        }
+        if ((p = strstr(line, "exe=\"")) && sscanf(p + 5, "%255[^\"]", exe) == 1) {
+            encontrado = 1;
+        }
+        if ((p = strstr(line, "tty=")) && sscanf(p + 4, "%63s", tty) == 1) {
+            encontrado = 1;
+        }
+        if ((p = strstr(line, "uid=")) && sscanf(p + 4, "%31s", uid) == 1) {
+            encontrado = 1;
+        }
+    }
+
+    pclose(fp);
+
+    if (encontrado) {
+        printf("   🔎 Proceso responsable de %s:\n", archivo);
+        printf("      🧠 Comando: %s\n", comm);
+        printf("      📁 Ejecutable: %s\n", exe);
+        printf("      👤 UID: %s\n", uid);
+        printf("      🖥️ TTY: %s\n", tty);
+        // Heurística
+        if (strcmp(tty, "(no registrado)") != 0 && strcmp(tty, "?") != 0) {
+            printf("      🧍 Probablemente un cambio manual (usuario en terminal)\n");
+        } else if (strstr(exe, "bash") || strstr(exe, "sh") || strstr(exe, "python")) {
+            printf("      🤖 Probablemente un script automático\n");
+        } else {
+            printf("      ❓ Origen del cambio: desconocido\n");
+        }
+    } else {
+        printf("   ⚠️ No se encontró registro de auditoría para %s\n", archivo);
+    }
+}
+
+
 void check_recursive(const char *path,
                      struct baseline_entry *baseline,
                      int baseline_count,
@@ -57,7 +128,7 @@ void check_recursive(const char *path,
     struct dirent *entry;
     while ((entry = readdir(d)) != NULL) {
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
-        if (entry->d_name[0] == '.') continue; // ignorar carpetas ocultas
+        if (entry->d_name[0] == '.') continue;
 
         char full_path[1024];
         snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
@@ -66,7 +137,9 @@ void check_recursive(const char *path,
         if (stat(full_path, &st) != 0) continue;
 
         if (S_ISDIR(st.st_mode)) {
-            check_recursive(full_path, baseline, baseline_count, total_checked, suspicious_count, found, scanned, scanned_count);
+            check_recursive(full_path, baseline, baseline_count,
+                            total_checked, suspicious_count,
+                            found, scanned, scanned_count);
         } else {
             (*total_checked)++;
 
@@ -84,7 +157,6 @@ void check_recursive(const char *path,
             char hash[256];
             compute_sha256(full_path, hash, sizeof(hash));
 
-            // Guardar en lista de archivos escaneados
             if (*scanned_count < MAX_FILES) {
                 strcpy(scanned[*scanned_count].path, full_path);
                 strcpy(scanned[*scanned_count].hash, hash);
@@ -97,17 +169,21 @@ void check_recursive(const char *path,
             }
             if (index == -1) {
                 printf("❗ Archivo nuevo sospechoso: %s\n", full_path);
+                mostrar_proceso_modificador(full_path);
                 (*suspicious_count)++;
             } else {
                 struct baseline_entry *b = &baseline[index];
 
                 if (strcmp(b->hash, hash) != 0) {
                     printf("📝 Contenido modificado: %s\n", full_path);
+                    mostrar_proceso_modificador(full_path);
                     (*suspicious_count)++;
                 }
 
                 if (b->size != st.st_size && labs(b->size - st.st_size) > b->size * 0.5) {
-                    printf("⚠️ Cambio de tamaño inusual: %s (%ld → %ld)\n", full_path, b->size, st.st_size);
+                    printf("⚠️ Cambio de tamaño inusual: %s (%ld → %ld)\n",
+                           full_path, b->size, st.st_size);
+                    mostrar_proceso_modificador(full_path);
                     (*suspicious_count)++;
                 }
 
@@ -115,17 +191,22 @@ void check_recursive(const char *path,
                     if (strcmp(current_perm, "777") == 0)
                         printf("⚠️ Permiso 777 sospechoso: %s\n", full_path);
                     else
-                        printf("⚠️ Permisos modificados: %s (%s → %s)\n", full_path, b->perms, current_perm);
+                        printf("⚠️ Permisos modificados: %s (%s → %s)\n",
+                               full_path, b->perms, current_perm);
+                    mostrar_proceso_modificador(full_path);
                     (*suspicious_count)++;
                 }
 
                 if (strcmp(b->owner, owner_str) != 0) {
-                    printf("⚠️ Propietario cambiado: %s (%s → %s)\n", full_path, b->owner, owner_str);
+                    printf("⚠️ Propietario cambiado: %s (%s → %s)\n",
+                           full_path, b->owner, owner_str);
+                    mostrar_proceso_modificador(full_path);
                     (*suspicious_count)++;
                 }
 
                 if (b->mtime != st.st_mtime) {
                     printf("⌛ Timestamp modificado: %s\n", full_path);
+                    mostrar_proceso_modificador(full_path);
                     (*suspicious_count)++;
                 }
             }
@@ -224,6 +305,7 @@ void compare_usb_security_baseline(const char *usb_path, const char *baseline_fi
     for (int i = 0; i < baseline_count; ++i) {
         if (!found[i]) {
             printf("❌ Eliminado: %s\n", baseline[i].path);
+            mostrar_proceso_modificador(baseline[i].path);
         }
     }
 
@@ -233,6 +315,8 @@ void compare_usb_security_baseline(const char *usb_path, const char *baseline_fi
             if (strcmp(scanned[i].hash, scanned[j].hash) == 0 &&
                 strcmp(scanned[i].path, scanned[j].path) != 0) {
                 printf("⚠️ Posible réplica: %s ≈ %s\n", scanned[i].path, scanned[j].path);
+                printf("Investigando proceso que creó %s:\n",scanned[j].path);
+                mostrar_proceso_modificador(scanned[j].path);
             }
         }
     }
