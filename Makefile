@@ -2,24 +2,28 @@ CC        = gcc
 CFLAGS    = -Wall -g
 INC       = -Iinclude
 
-SRC       = src/main.c src/usb_monitor.c
-OUT       = build/matcom_guard
+# Archivos fuente
+SRC_USB   = src/main.c src/usb_monitor.c
+SRC_PROC  = src/process_monitor_main.c src/process_monitor.c
+SRC_GUI   = src/gui.c src/usb_monitor.c src/process_monitor.c
 
-GUI_SRC   = src/gui.c
-GUI_BIN   = build/matcom_gui
+# Binarios de salida
+OUT_USB   = build/matcom_guard
+OUT_PROC  = build/matcom_guard_proc
+OUT_GUI   = build/matcom_gui
 
-# Objetivo por defecto: construye ambos binarios
-all: $(OUT) $(GUI_BIN)
+# Objetivo principal
+all: $(OUT_USB) $(OUT_PROC) $(OUT_GUI)
 
-# Regla para el binario de consola
-$(OUT): $(SRC)
+# Reglas individuales
+$(OUT_USB): $(SRC_USB)
 	$(CC) $(CFLAGS) $(INC) -o $@ $^
 
-# Regla para la interfaz gráfica (GTK)
-$(GUI_BIN): $(GUI_SRC)
-	$(CC) $(CFLAGS) $(INC) `pkg-config --cflags gtk+-3.0` $< -o $@ `pkg-config --libs gtk+-3.0`
+$(OUT_PROC): $(SRC_PROC)
+	$(CC) $(CFLAGS) $(INC) -o $@ $^
 
-# Limpia ambos binarios
+$(OUT_GUI): $(SRC_GUI)
+	$(CC) $(CFLAGS) $(INC) `pkg-config --cflags gtk+-3.0` -o $@ $^ `pkg-config --libs gtk+-3.0`
+
 clean:
-	rm -f $(OUT) $(GUI_BIN)
-
+	rm -f $(OUT_USB) $(OUT_PROC) $(OUT_GUI)
