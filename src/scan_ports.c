@@ -33,6 +33,8 @@ const char *servicio_por_puerto(int port)
     return "IMAP";
   case 443:
     return "HTTPS";
+  case 631:
+    return "CUPS";
   default:
     return "Desconocido";
   }

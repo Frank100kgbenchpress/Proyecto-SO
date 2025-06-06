@@ -15,51 +15,61 @@ double alert_threshold = 10.0;
 double proc_cpu_threshold = 70.0;
 double proc_ram_threshold = 50.0;
 
-void save_alert_threshold(double threshold) {
+void save_alert_threshold(double threshold)
+{
     char path[256];
     snprintf(path, sizeof(path), CONFIG_USB_PATH_FORMAT, getenv("USER"));
     FILE *f = fopen(path, "w");
-    if (f) {
+    if (f)
+    {
         fprintf(f, "%.1f\n", threshold);
         fclose(f);
     }
 }
 
-void load_alert_threshold() {
+void load_alert_threshold()
+{
     char path[256];
     snprintf(path, sizeof(path), CONFIG_USB_PATH_FORMAT, getenv("USER"));
     FILE *f = fopen(path, "r");
-    if (f) {
+    if (f)
+    {
         fscanf(f, "%lf", &alert_threshold);
         fclose(f);
     }
 }
 
-void save_proc_thresholds(double cpu, double ram) {
+void save_proc_thresholds(double cpu, double ram)
+{
     char path[256];
     snprintf(path, sizeof(path), CONFIG_PROC_PATH_FORMAT, getenv("USER"));
     FILE *f = fopen(path, "w");
-    if (f) {
+    if (f)
+    {
         fprintf(f, "%.1f %.1f\n", cpu, ram);
         fclose(f);
     }
 }
 
-void load_proc_thresholds() {
+void load_proc_thresholds()
+{
     char path[256];
     snprintf(path, sizeof(path), CONFIG_PROC_PATH_FORMAT, getenv("USER"));
     FILE *f = fopen(path, "r");
-    if (f) {
+    if (f)
+    {
         fscanf(f, "%lf %lf", &proc_cpu_threshold, &proc_ram_threshold);
         fclose(f);
     }
 }
 
-static void scan_usb(GtkWidget *widget, gpointer data) {
+static void scan_usb(GtkWidget *widget, gpointer data)
+{
     GtkTextBuffer *buffer = GTK_TEXT_BUFFER(data);
     const gchar *selected_usb = gtk_combo_box_text_get_active_text(GTK_COMBO_BOX_TEXT(combo_usb));
 
-    if (!selected_usb || strlen(selected_usb) == 0) {
+    if (!selected_usb || strlen(selected_usb) == 0)
+    {
         GtkWidget *dialog = gtk_message_dialog_new(NULL, GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_CLOSE,
                                                    "No se seleccionó ningún dispositivo USB.");
         gtk_dialog_run(GTK_DIALOG(dialog));
@@ -71,47 +81,75 @@ static void scan_usb(GtkWidget *widget, gpointer data) {
     snprintf(cmd, sizeof(cmd), "./build/matcom_guard \"%s\" %.1f", selected_usb, alert_threshold);
 
     FILE *fp = popen(cmd, "r");
-    if (!fp) return;
+    if (!fp)
+        return;
 
     char line[1024];
     GtkTextIter iter;
     gtk_text_buffer_set_text(buffer, "", -1);
     gtk_text_buffer_get_iter_at_offset(buffer, &iter, 0);
 
-    while (fgets(line, sizeof(line), fp)) {
+    while (fgets(line, sizeof(line), fp))
+    {
         gtk_text_buffer_insert(buffer, &iter, line, -1);
     }
 
     pclose(fp);
 }
 
-static void monitor_processes(GtkWidget *widget, gpointer data) {
+static void monitor_processes(GtkWidget *widget, gpointer data)
+{
     GtkTextBuffer *buffer = GTK_TEXT_BUFFER(data);
     char cmd[512];
     snprintf(cmd, sizeof(cmd), "./build/matcom_guard_proc %.1f %.1f", proc_cpu_threshold, proc_ram_threshold);
 
     FILE *fp = popen(cmd, "r");
-    if (!fp) return;
+    if (!fp)
+        return;
 
     char line[1024];
     GtkTextIter iter;
     gtk_text_buffer_set_text(buffer, "", -1);
     gtk_text_buffer_get_iter_at_offset(buffer, &iter, 0);
 
-    while (fgets(line, sizeof(line), fp)) {
+    while (fgets(line, sizeof(line), fp))
+    {
         gtk_text_buffer_insert(buffer, &iter, line, -1);
     }
 
     pclose(fp);
 }
 
-static void open_settings_dialog(GtkWidget *widget, gpointer data) {
+static void scan_ports(GtkWidget *widget, gpointer data)
+{
+    GtkTextBuffer *buffer = GTK_TEXT_BUFFER(data);
+    char cmd[] = "./build/matcom_guard_ports";
+
+    FILE *fp = popen(cmd, "r");
+    if (!fp)
+        return;
+
+    char line[1024];
+    GtkTextIter iter;
+    gtk_text_buffer_set_text(buffer, "", -1); // Limpiar el textview
+    gtk_text_buffer_get_iter_at_offset(buffer, &iter, 0);
+
+    while (fgets(line, sizeof(line), fp))
+    {
+        gtk_text_buffer_insert(buffer, &iter, line, -1);
+    }
+
+    pclose(fp);
+}
+
+static void open_settings_dialog(GtkWidget *widget, gpointer data)
+{
     GtkWidget *dialog = gtk_dialog_new_with_buttons("Configuración de Umbral USB",
-                                                   NULL,
-                                                   GTK_DIALOG_MODAL,
-                                                   "Aceptar", GTK_RESPONSE_OK,
-                                                   "Cancelar", GTK_RESPONSE_CANCEL,
-                                                   NULL);
+                                                    NULL,
+                                                    GTK_DIALOG_MODAL,
+                                                    "Aceptar", GTK_RESPONSE_OK,
+                                                    "Cancelar", GTK_RESPONSE_CANCEL,
+                                                    NULL);
 
     GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
     GtkWidget *spin = gtk_spin_button_new_with_range(1.0, 100.0, 1.0);
@@ -125,7 +163,8 @@ static void open_settings_dialog(GtkWidget *widget, gpointer data) {
     gtk_container_add(GTK_CONTAINER(content_area), box);
     gtk_widget_show_all(dialog);
 
-    if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK) {
+    if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK)
+    {
         alert_threshold = gtk_spin_button_get_value(GTK_SPIN_BUTTON(spin));
         save_alert_threshold(alert_threshold);
     }
@@ -133,13 +172,14 @@ static void open_settings_dialog(GtkWidget *widget, gpointer data) {
     gtk_widget_destroy(dialog);
 }
 
-static void open_proc_settings_dialog(GtkWidget *widget, gpointer data) {
+static void open_proc_settings_dialog(GtkWidget *widget, gpointer data)
+{
     GtkWidget *dialog = gtk_dialog_new_with_buttons("Configuración de Umbrales de Procesos",
-                                                   NULL,
-                                                   GTK_DIALOG_MODAL,
-                                                   "Aceptar", GTK_RESPONSE_OK,
-                                                   "Cancelar", GTK_RESPONSE_CANCEL,
-                                                   NULL);
+                                                    NULL,
+                                                    GTK_DIALOG_MODAL,
+                                                    "Aceptar", GTK_RESPONSE_OK,
+                                                    "Cancelar", GTK_RESPONSE_CANCEL,
+                                                    NULL);
 
     GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
 
@@ -167,7 +207,8 @@ static void open_proc_settings_dialog(GtkWidget *widget, gpointer data) {
     gtk_container_add(GTK_CONTAINER(content_area), box);
     gtk_widget_show_all(dialog);
 
-    if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK) {
+    if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK)
+    {
         proc_cpu_threshold = gtk_spin_button_get_value(GTK_SPIN_BUTTON(spin_cpu));
         proc_ram_threshold = gtk_spin_button_get_value(GTK_SPIN_BUTTON(spin_ram));
         save_proc_thresholds(proc_cpu_threshold, proc_ram_threshold);
@@ -176,7 +217,8 @@ static void open_proc_settings_dialog(GtkWidget *widget, gpointer data) {
     gtk_widget_destroy(dialog);
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
     gtk_init(&argc, &argv);
     load_alert_threshold();
     load_proc_thresholds();
@@ -202,11 +244,14 @@ int main(int argc, char *argv[]) {
     snprintf(base_path, sizeof(base_path), "/media/%s", getenv("USER"));
     DIR *dir = opendir(base_path);
     struct dirent *entry;
-    if (dir) {
-        while ((entry = readdir(dir)) != NULL) {
+    if (dir)
+    {
+        while ((entry = readdir(dir)) != NULL)
+        {
             if (entry->d_type == DT_DIR &&
                 strcmp(entry->d_name, ".") != 0 &&
-                strcmp(entry->d_name, "..") != 0) {
+                strcmp(entry->d_name, "..") != 0)
+            {
                 gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(combo_usb), entry->d_name);
             }
         }
@@ -222,7 +267,7 @@ int main(int argc, char *argv[]) {
     GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
     gtk_container_add(GTK_CONTAINER(scroll), text_view);
     gtk_widget_set_vexpand(scroll, TRUE);
-    gtk_grid_attach(GTK_GRID(grid), scroll, 0, 6, 2, 1);
+    gtk_grid_attach(GTK_GRID(grid), scroll, 0, 7, 2, 1);
 
     GtkWidget *btn_usb = gtk_button_new_with_label("2. Escanear memoria USB");
     g_signal_connect(btn_usb, "clicked", G_CALLBACK(scan_usb), output_buffer);
@@ -240,7 +285,10 @@ int main(int argc, char *argv[]) {
     g_signal_connect(btn_proc_config, "clicked", G_CALLBACK(open_proc_settings_dialog), NULL);
     gtk_grid_attach(GTK_GRID(grid), btn_proc_config, 0, 5, 2, 1);
 
-    
+    GtkWidget *btn_ports = gtk_button_new_with_label("4. Escanear puertos locales");
+    g_signal_connect(btn_ports, "clicked", G_CALLBACK(scan_ports), output_buffer);
+    gtk_grid_attach(GTK_GRID(grid), btn_ports, 0, 6, 2, 1);
+
     g_signal_connect(window, "destroy", G_CALLBACK(gtk_main_quit), NULL);
 
     gtk_widget_show_all(window);
