@@ -9,7 +9,7 @@
 #include <errno.h>
 #include <ctype.h>
 
-#define MAX_PORT 1024
+#define MAX_PORT 10000
 
 const char *servicio_por_puerto(int port)
 {
@@ -117,8 +117,14 @@ void buscar_proceso_en_puerto(int puerto)
           FILE *cmd = fopen(cmd_path, "r");
           if (cmd && fgets(cmdline, sizeof(cmdline), cmd))
           {
-            printf("⚠️  Proceso sospechoso: PID %s → %s\n", entry->d_name, cmdline);
-            fclose(cmd);
+            if (strcmp(servicio_por_puerto(puerto), "Desconocido") == 0)
+            {
+              printf("⚠️  Proceso sospechoso: PID %s → %s\n", entry->d_name, cmdline);
+            }
+            else
+            {
+              printf("ℹ️  Proceso asociado al servicio %s: PID %s → %s\n", servicio_por_puerto(puerto), entry->d_name, cmdline);
+            }
           }
           else
           {
@@ -139,6 +145,11 @@ void buscar_proceso_en_puerto(int puerto)
 
 void escanear_puertos_con_proceso()
 {
+  if (geteuid() != 0)
+  {
+    printf("⚠️  Advertencia: Este escáner necesita privilegios de administrador para ver todos los procesos.\n");
+    printf("   Ejecuta con: sudo ./build/matcom_guard_ports\n\n");
+  }
   struct sockaddr_in direccion;
   int sock;
 
@@ -159,10 +170,16 @@ void escanear_puertos_con_proceso()
     int resultado = connect(sock, (struct sockaddr *)&direccion, sizeof(direccion));
     if (resultado == 0)
     {
-      printf("%d\tAbierto\t\t%s\n", puerto, servicio_por_puerto(puerto));
-      buscar_proceso_en_puerto(puerto); // analiza si el proceso puede ser sospechoso
-    }
+      const char *servicio = servicio_por_puerto(puerto);
+      printf("%d\tAbierto\t\t%s\n", puerto, servicio);
 
+      if (puerto > 1024 && strcmp(servicio, "Desconocido") == 0)
+      {
+        printf("⚠️  Alerta: puerto alto sin servicio conocido (%d)\n", puerto);
+      }
+
+      buscar_proceso_en_puerto(puerto);
+    }
     close(sock);
   }
 }
