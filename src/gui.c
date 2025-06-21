@@ -268,7 +268,7 @@ int main(int argc, char *argv[]) {
     GtkWidget *auto_scroll = gtk_scrolled_window_new(NULL, NULL);
     gtk_container_add(GTK_CONTAINER(auto_scroll), usb_auto_view);
     gtk_widget_set_vexpand(auto_scroll, TRUE);
-    gtk_grid_attach(GTK_GRID(grid), auto_scroll, 2, 7, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), auto_scroll, 2, 7, 2, 1);
 
     GtkWidget *btn_usb = gtk_button_new_with_label("2. Escanear memoria USB");
     g_signal_connect(btn_usb, "clicked", G_CALLBACK(scan_usb), output_buffer);
