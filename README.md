@@ -67,7 +67,7 @@ Reemplaza `yourusername` por tu nombre de usuario real.
 Ejemplo (ajusta el nombre de tu unidad):
 
 ```bash
-sudo auditctl -w /media/yourusername/MEMORIA -p war -k usb_watch
+sudo auditctl -w /media/yourusername/MEMORIA 
 ```
 
 Este comando activa el monitoreo de cambios para esa unidad.
