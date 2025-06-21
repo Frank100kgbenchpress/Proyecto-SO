@@ -109,4 +109,5 @@ La interfaz GTK incluye:
 ## ✨ Créditos
 
 Proyecto desarrollado para la asignatura Sistemas Operativos  por Frank Alberto Piz Torriente y Abel de la Noval Perez
+
 Facultad de Matemática y Computación - Universidad de La Habana
