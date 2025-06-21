@@ -12,6 +12,8 @@
 static GtkWidget *combo_usb;
 static GtkTextBuffer *output_buffer;
 static GtkTextBuffer *usb_auto_buffer;
+static GtkTextBuffer *proc_auto_buffer;
+
 
 double alert_threshold = 10.0;
 double proc_cpu_threshold = 70.0;
@@ -211,6 +213,24 @@ void *usb_auto_monitor_thread(void *arg) {
     }
     return NULL;
 }
+void *proc_auto_monitor_thread(void *arg) {
+    GtkTextBuffer *buffer = (GtkTextBuffer *)arg;
+    while (1) {
+        FILE *fp = popen("./build/matcom_guard_proc_auto", "r");
+        if (fp) {
+            char line[1024];
+            GtkTextIter iter;
+            gtk_text_buffer_set_text(buffer, "", -1);
+            gtk_text_buffer_get_iter_at_offset(buffer, &iter, 0);
+            while (fgets(line, sizeof(line), fp)) {
+                gtk_text_buffer_insert(buffer, &iter, line, -1);
+            }
+            pclose(fp);
+        }
+        sleep(60);
+    }
+    return NULL;
+}
 
 int main(int argc, char *argv[]) {
     gtk_init(&argc, &argv);
@@ -270,6 +290,16 @@ int main(int argc, char *argv[]) {
     gtk_widget_set_vexpand(auto_scroll, TRUE);
     gtk_grid_attach(GTK_GRID(grid), auto_scroll, 2, 7, 2, 1);
 
+    // Área para procesos automáticos
+    GtkWidget *proc_auto_view = gtk_text_view_new();
+    gtk_text_view_set_editable(GTK_TEXT_VIEW(proc_auto_view), FALSE);
+    gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(proc_auto_view), GTK_WRAP_WORD);
+    proc_auto_buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(proc_auto_view));
+    GtkWidget *proc_scroll = gtk_scrolled_window_new(NULL, NULL);
+    gtk_container_add(GTK_CONTAINER(proc_scroll), proc_auto_view);
+    gtk_widget_set_vexpand(proc_scroll, TRUE);
+    gtk_grid_attach(GTK_GRID(grid), proc_scroll, 2, 8, 2, 1);  // Ajusta columna si hace falta
+
     GtkWidget *btn_usb = gtk_button_new_with_label("2. Escanear memoria USB");
     g_signal_connect(btn_usb, "clicked", G_CALLBACK(scan_usb), output_buffer);
     gtk_grid_attach(GTK_GRID(grid), btn_usb, 0, 2, 2, 1);
@@ -296,6 +326,10 @@ int main(int argc, char *argv[]) {
     // Iniciar hilo para escaneo automático de USB
     pthread_t auto_thread;
     pthread_create(&auto_thread, NULL, usb_auto_monitor_thread, usb_auto_buffer);
+    // Iniciar hilo para escaneo automático de Procesos
+    pthread_t proc_thread;
+    pthread_create(&proc_thread, NULL, proc_auto_monitor_thread, proc_auto_buffer);
+
 
     gtk_main();
     return 0;
